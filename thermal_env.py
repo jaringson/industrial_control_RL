@@ -43,8 +43,8 @@ class MultiZoneThermalControlEnv(gym.Env):
                 if i != j:
                     next_state[i] += self.interaction_factor * (self.state[j] - self.state[i])
         
-        # Ensure temperatures remain within bounds
-        next_state = np.clip(next_state, self.temp_bounds[0], self.temp_bounds[1])
+        # # Ensure temperatures remain within bounds
+        # next_state = np.clip(next_state, self.temp_bounds[0], self.temp_bounds[1])
         
         # Calculate reward: penalize energy usage and temperature deviation
         temp_deviation = np.abs(next_state - self.target_temp)

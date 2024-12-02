@@ -1,6 +1,7 @@
 from thermal_env import MultiZoneThermalControlEnv
 
 env = MultiZoneThermalControlEnv()
+print("Action Space Shape :", env.action_space.shape)
 
 state = env.reset()
 print("Initial State:", state)
