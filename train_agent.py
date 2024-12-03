@@ -31,7 +31,7 @@ class PPOAgent(nn.Module):
 
 # 2. Define PPO parameters
 class PPO:
-    def __init__(self, state_dim, action_dims, hidden_dim=128, lr=3e-4, gamma=0.99, eps_clip=0.2, K=2):
+    def __init__(self, state_dim, action_dims, hidden_dim=128, lr=3e-4, gamma=0.99, eps_clip=0.2, K=4):
         self.gamma = gamma
         self.eps_clip = eps_clip
         self.K = K
@@ -60,6 +60,9 @@ class PPO:
             actions.append(action)
             log_probs.append(dist.log_prob(action))
 
+        # print(action_logits)
+        # print(actions)
+        # set_trace()
         # Save memory
         memory.states.append(state)
         memory.actions.append(torch.stack(actions))
@@ -72,6 +75,7 @@ class PPO:
         states = torch.stack(memory.states)
         actions = torch.stack(memory.actions).squeeze(-1)
         log_probs_old = torch.stack(memory.log_probs).squeeze(-1)
+        log_probs_old = log_probs_old.sum(dim=-1)
         rewards = memory.rewards
         dones = memory.dones
 
@@ -87,12 +91,16 @@ class PPO:
 
         # Normalize returns
         returns = (returns - returns.mean()) / (returns.std() + 1e-5)
+        set_trace()
 
         for _ in range(self.K):
-            action_logits, state_values = self.policy(states)
+            # for param in self.policy.parameters():
+            #     print(torch.isnan(param).any())
+
+            norm_states = (states - states.mean()) / (states.std() + 1e-5)
+            action_logits, state_values = self.policy(norm_states)
 
             # Debugging: Check for NaNs in logits
-            # set_trace()
             if torch.isnan(action_logits).any():
                 raise ValueError("Action logits contain NaNs!")
 
@@ -105,7 +113,6 @@ class PPO:
                 log_probs.append(dist.log_prob(actions[:, i]))
 
             log_probs = torch.stack(log_probs, dim=-1).sum(dim=-1)  # Combine log probabilities
-            log_probs_old = log_probs_old.sum(dim=-1)
 
             # Compute ratios for importance sampling
             ratios = torch.exp(log_probs - log_probs_old.detach())
@@ -121,6 +128,9 @@ class PPO:
 
             # Total loss
             loss = loss_actor + 0.5 * loss_critic
+
+            # print('Loss: ', loss)
+            # set_trace()
 
             # Backpropagation
             self.optimizer.zero_grad()
@@ -178,6 +188,7 @@ def train_ppo():
 
             # Select action
             action = ppo.select_action(state, memory)
+            # print(action)
             next_state, reward, done, _ = env.step(action)  # Pass the list of actions
             memory.rewards.append(reward)
             memory.dones.append(done)
