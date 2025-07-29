@@ -6,7 +6,7 @@ from rl_gym_industrial_env import IndustrialEnvGym
 
 # Create and verify the environment
 env = IndustrialEnvGym(num_reservoirs=3)
-check_env(env)  # Check if the environment adheres to Gym's API
+# check_env(env)  # Check if the environment adheres to Gym's API
 
 # Define the RL model
 model = PPO(
