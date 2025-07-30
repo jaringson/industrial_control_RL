@@ -1,4 +1,4 @@
-from thermal_env import MultiZoneThermalControlEnv
+from industrial_env.thermal_env import MultiZoneThermalControlEnv
 
 env = MultiZoneThermalControlEnv()
 print("Action Space Shape :", env.action_space.shape)

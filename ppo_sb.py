@@ -1,9 +1,11 @@
 from stable_baselines3 import PPO
+from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.env_util import make_vec_env
-from thermal_env import MultiZoneThermalControlEnv
+from industrial_env.thermal_env import MultiZoneThermalControlEnv
 
 # 1. Create the environment
 env = MultiZoneThermalControlEnv()
+# check_env(env)
 
 # 2. Wrap the environment for vectorized training (optional, improves performance)
 vec_env = make_vec_env(lambda: env, n_envs=4)  # Use 4 parallel environments

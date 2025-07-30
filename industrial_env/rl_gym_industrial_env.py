@@ -1,8 +1,10 @@
 import numpy as np
-import gym
-from gym import spaces
+import gymnasium
+from gymnasium import spaces
 
-class IndustrialEnvGym(gym.Env):
+from IPython.core.debugger import set_trace
+
+class IndustrialEnvGym(gymnasium.Env):
     def __init__(self, num_reservoirs):
         super(IndustrialEnvGym, self).__init__()
 
@@ -11,16 +13,16 @@ class IndustrialEnvGym(gym.Env):
         # Define action and observation spaces
         # Actions: Heat inputs (Watts) and flow rates (kg/s)
         self.action_space = spaces.Box(
-            low=np.array([0] * num_reservoirs + [0] * (num_reservoirs**2)),
-            high=np.array([2000] * num_reservoirs + [10] * (num_reservoirs**2)),
-            dtype=np.float32
+            low=np.array([-20] * num_reservoirs + [0] * (num_reservoirs**2)),
+            high=np.array([20] * num_reservoirs + [10] * (num_reservoirs**2)),
+            dtype=np.float64
         )
 
         # Observations: Temperatures (K) and pressures (atm)
         self.observation_space = spaces.Box(
-            low=np.array([200] * num_reservoirs + [0.1] * num_reservoirs),
-            high=np.array([500] * num_reservoirs + [20] * num_reservoirs),
-            dtype=np.float32
+            low=np.array([300] * num_reservoirs + [0.1] * num_reservoirs),
+            high=np.array([400] * num_reservoirs + [20] * num_reservoirs),
+            dtype=np.float64
         )
 
         # Initialize state
@@ -82,19 +84,33 @@ class IndustrialEnvGym(gym.Env):
         reward = -np.sum((self.temperatures - target_temperatures)**2) #- np.sum((self.pressures - target_pressures)**2)
 
         # Check termination condition
-        done = np.any(self.temperatures < 200) or np.any(self.temperatures > 500) or \
-               np.any(self.pressures < 0.1) or np.any(self.pressures > 20)
+        terminated = bool(np.any(self.temperatures < 200) or np.any(self.temperatures > 500) or \
+               np.any(self.pressures < 0.1) or np.any(self.pressures > 20))
 
         # Compile observation
         observation = np.concatenate((self.temperatures, self.pressures))
 
-        return observation, reward, done, {}
 
-    def reset(self):
+        truncated = False
+        info = {}
+
+        return observation, reward, terminated, truncated, info
+
+    def reset(self, seed=None, options=None):
+        if seed is not None:
+            self.random_seed = seed
+            np.random.seed(self.random_seed)
+        
         self.temperatures = np.random.uniform(300, 400, self.num_reservoirs)
         self.pressures = np.random.uniform(1, 10, self.num_reservoirs)
         self.flows = np.zeros((self.num_reservoirs, self.num_reservoirs))
-        return np.concatenate((self.temperatures, self.pressures))
+
+        info = {} 
+
+        return np.concatenate((self.temperatures, self.pressures)), info
+
+    def render(self, mode='human'):
+        print(f"State: {self.temperatures}, {self.pressures}")
 
 # Example Usage
 if __name__ == "__main__":
@@ -102,8 +118,8 @@ if __name__ == "__main__":
     obs = env.reset()
     print("Initial Observation:", obs)
 
-    action = np.array([1000, 1500, 1200, 0, 5, 3, 2, 0, 4, 3, 6, 0])
-    obs, reward, done, info = env.step(action)
+    action = np.array([10, 15, 12, 0, 5, 3, 2, 0, 4, 3, 6, 0])
+    obs, reward, terminated, truncated, info = env.step(action)
     print("Next Observation:", obs)
     print("Reward:", reward)
-    print("Done:", done)
+    print("Terminated:", terminated)

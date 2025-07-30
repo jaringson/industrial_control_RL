@@ -1,216 +1,185 @@
+import gymnasium as gym
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.distributions import Categorical
-from thermal_env import MultiZoneThermalControlEnv
 import numpy as np
+from torch.distributions import Normal
+from torch.utils.tensorboard import SummaryWriter
+import time
+import industrial_env
 
-from IPython.core.debugger import set_trace
+# PPO Hyperparameters
+class PPOConfig:
+    env_id = "IndustrialEnvGym-v0"
+    num_envs = 1
+    total_timesteps = 500_000
+    learning_rate = 3e-4
+    gamma = 0.99
+    gae_lambda = 0.95
+    clip_coef = 0.2
+    update_epochs = 10
+    minibatch_size = 64
+    steps_per_epoch = 2048
+    vf_coef = 0.5
+    ent_coef = 0.01
+    max_grad_norm = 0.5
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# 1. Define the PPO agent
-class PPOAgent(nn.Module):
-    def __init__(self, state_dim, action_dims, hidden_dim=128):
-        super(PPOAgent, self).__init__()
-        # Actor network
+
+class ActorCritic(nn.Module):
+    def __init__(self, obs_dim, act_dim):
+        super().__init__()
         self.actor = nn.Sequential(
-            nn.Linear(state_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, sum(action_dims))
+            nn.Linear(obs_dim, 64), nn.Tanh(),
+            nn.Linear(64, 64), nn.Tanh(),
+            nn.Linear(64, act_dim)
         )
-        # Critic network
+        self.log_std = nn.Parameter(torch.zeros(act_dim))
+
         self.critic = nn.Sequential(
-            nn.Linear(state_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, 1)
+            nn.Linear(obs_dim, 64), nn.Tanh(),
+            nn.Linear(64, 64), nn.Tanh(),
+            nn.Linear(64, 1)
         )
 
-    def forward(self, state):
-        action_logits = self.actor(state)
-        state_value = self.critic(state)
-        return action_logits, state_value
+    def get_action_and_value(self, obs):
+        mean = self.actor(obs)
+        std = torch.exp(self.log_std)
+        dist = Normal(mean, std)
+        action = dist.sample()
+        log_prob = dist.log_prob(action).sum(axis=-1)
+        value = self.critic(obs).squeeze(-1)
+        return action, log_prob, value
 
-# 2. Define PPO parameters
-class PPO:
-    def __init__(self, state_dim, action_dims, hidden_dim=128, lr=3e-4, gamma=0.99, eps_clip=0.2, K=4):
-        self.gamma = gamma
-        self.eps_clip = eps_clip
-        self.K = K
+    def evaluate_actions(self, obs, actions):
+        mean = self.actor(obs)
+        std = torch.exp(self.log_std)
+        dist = Normal(mean, std)
+        log_prob = dist.log_prob(actions).sum(axis=-1)
+        entropy = dist.entropy().sum(axis=-1)
+        value = self.critic(obs).squeeze(-1)
+        return log_prob, entropy, value
 
-        self.action_dims = action_dims
-        self.policy = PPOAgent(state_dim, action_dims, hidden_dim)
-        self.optimizer = optim.Adam(self.policy.parameters(), lr=lr)
-        self.policy_old = PPOAgent(state_dim, action_dims, hidden_dim)
-        self.policy_old.load_state_dict(self.policy.state_dict())
 
-        self.mse_loss = nn.MSELoss()
+def collect_trajectories(env, model, config):
+    obs_list, act_list, logp_list, rew_list, val_list, done_list = [], [], [], [], [], []
+    obs, _ = env.reset()
+    for _ in range(config.steps_per_epoch):
+        obs_tensor = torch.tensor(obs, dtype=torch.float32, device=config.device)
+        with torch.no_grad():
+            action, logp, value = model.get_action_and_value(obs_tensor)
 
-    def select_action(self, state, memory):
-        state = torch.FloatTensor(state)
-        action_logits, _ = self.policy_old(state)
+        action_np = action.cpu().numpy()
+        next_obs, reward, done, truncated, info = env.step(action_np)
 
-        # Separate logits for each action dimension
-        action_logits_split = torch.split(action_logits, tuple(self.action_dims), dim=-1)
-        actions = []
-        log_probs = []
+        obs_list.append(obs)
+        act_list.append(action_np)
+        logp_list.append(logp.cpu().numpy())
+        rew_list.append(reward)
+        val_list.append(value.cpu().numpy())
+        done_list.append(done)
 
-        for logits in action_logits_split:
-            probs = torch.softmax(logits, dim=-1)  # Normalize logits to probabilities
-            dist = Categorical(probs=probs)
-            action = dist.sample()
-            actions.append(action)
-            log_probs.append(dist.log_prob(action))
+        obs = next_obs
+        if done:
+            obs, _ = env.reset()
 
-        # print(action_logits)
-        # print(actions)
-        # set_trace()
-        # Save memory
-        memory.states.append(state)
-        memory.actions.append(torch.stack(actions))
-        memory.log_probs.append(torch.stack(log_probs))
+    return {
+        "obs": np.array(obs_list),
+        "actions": np.array(act_list),
+        "logp": np.array(logp_list),
+        "rewards": np.array(rew_list),
+        "values": np.array(val_list),
+        "dones": np.array(done_list)
+    }
 
-        return [a.item() for a in actions]
 
+def compute_gae(trajectories, gamma, lam):
+    rewards = trajectories["rewards"]
+    values = trajectories["values"]
+    dones = trajectories["dones"]
+    adv = np.zeros_like(rewards)
+    lastgaelam = 0
+    for t in reversed(range(len(rewards))):
+        if t == len(rewards) - 1:
+            nextnonterminal = 1.0 - dones[t]
+            nextvalues = values[t]
+        else:
+            nextnonterminal = 1.0 - dones[t + 1]
+            nextvalues = values[t + 1]
+        delta = rewards[t] + gamma * nextvalues * nextnonterminal - values[t]
+        adv[t] = lastgaelam = delta + gamma * lam * nextnonterminal * lastgaelam
+    returns = adv + values
+    return adv, returns
+
+
+def train():
+    config = PPOConfig()
+    writer = SummaryWriter(f"runs/ppo-industrial-{int(time.time())}")
     
-    def update(self, memory):
-        states = torch.stack(memory.states)
-        actions = torch.stack(memory.actions).squeeze(-1)
-        log_probs_old = torch.stack(memory.log_probs).squeeze(-1)
-        log_probs_old = log_probs_old.sum(dim=-1)
-        rewards = memory.rewards
-        dones = memory.dones
+    env = gym.make(config.env_id, num_reservoirs=3)
+    obs_dim = env.observation_space.shape[0]
+    act_dim = env.action_space.shape[0]
 
-        # Calculate discounted returns
-        returns = []
-        discounted_sum = 0
-        for reward, done in zip(reversed(rewards), reversed(dones)):
-            if done:
-                discounted_sum = 0
-            discounted_sum = reward + self.gamma * discounted_sum
-            returns.insert(0, discounted_sum)
-        returns = torch.tensor(returns, dtype=torch.float32)
+    model = ActorCritic(obs_dim, act_dim).to(config.device)
+    optimizer = optim.Adam(model.parameters(), lr=config.learning_rate)
 
-        # Normalize returns
-        returns = (returns - returns.mean()) / (returns.std() + 1e-5)
-        set_trace()
+    global_step = 0
 
-        for _ in range(self.K):
-            # for param in self.policy.parameters():
-            #     print(torch.isnan(param).any())
+    for update in range(config.total_timesteps // config.steps_per_epoch):
+        model.eval()
+        data = collect_trajectories(env, model, config)
+        adv, returns = compute_gae(data, config.gamma, config.gae_lambda)
 
-            norm_states = (states - states.mean()) / (states.std() + 1e-5)
-            action_logits, state_values = self.policy(norm_states)
+        # Flatten
+        obs = torch.tensor(data["obs"], dtype=torch.float32, device=config.device)
+        actions = torch.tensor(data["actions"], dtype=torch.float32, device=config.device)
+        logp_old = torch.tensor(data["logp"], dtype=torch.float32, device=config.device)
+        returns = torch.tensor(returns, dtype=torch.float32, device=config.device)
+        adv = torch.tensor(adv, dtype=torch.float32, device=config.device)
+        adv = (adv - adv.mean()) / (adv.std() + 1e-8)
 
-            # Debugging: Check for NaNs in logits
-            if torch.isnan(action_logits).any():
-                raise ValueError("Action logits contain NaNs!")
+        model.train()
+        for epoch in range(config.update_epochs):
+            inds = np.arange(config.steps_per_epoch)
+            np.random.shuffle(inds)
+            for start in range(0, config.steps_per_epoch, config.minibatch_size):
+                end = start + config.minibatch_size
+                mb_inds = inds[start:end]
 
-            # Split logits for multi-dimensional action spaces
-            log_probs = []
-            for i, logits in enumerate(torch.split(action_logits, tuple(self.action_dims), dim=-1)):
-                # Clamp logits for numerical stability
-                logits = torch.clamp(logits, min=-20, max=20)
-                dist = Categorical(probs=torch.softmax(logits, dim=-1))
-                log_probs.append(dist.log_prob(actions[:, i]))
+                mb_obs = obs[mb_inds]
+                mb_actions = actions[mb_inds]
+                mb_logp_old = logp_old[mb_inds]
+                mb_returns = returns[mb_inds]
+                mb_adv = adv[mb_inds]
 
-            log_probs = torch.stack(log_probs, dim=-1).sum(dim=-1)  # Combine log probabilities
+                new_logp, entropy, value = model.evaluate_actions(mb_obs, mb_actions)
 
-            # Compute ratios for importance sampling
-            ratios = torch.exp(log_probs - log_probs_old.detach())
+                ratio = (new_logp - mb_logp_old).exp()
+                clip_adv = torch.clamp(ratio, 1.0 - config.clip_coef, 1.0 + config.clip_coef) * mb_adv
+                policy_loss = -torch.min(ratio * mb_adv, clip_adv).mean()
 
-            # Compute surrogate loss
-            advantages = returns - state_values.detach().squeeze(-1)
-            surr1 = ratios * advantages
-            surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
-            loss_actor = -torch.min(surr1, surr2).mean()
+                value_loss = ((value - mb_returns) ** 2).mean()
+                entropy_loss = entropy.mean()
 
-            # Critic loss
-            loss_critic = self.mse_loss(state_values.squeeze(-1), returns)
+                loss = policy_loss + config.vf_coef * value_loss - config.ent_coef * entropy_loss
 
-            # Total loss
-            loss = loss_actor + 0.5 * loss_critic
+                optimizer.zero_grad()
+                loss.backward()
+                nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
+                optimizer.step()
 
-            # print('Loss: ', loss)
-            # set_trace()
+        global_step += config.steps_per_epoch
+        writer.add_scalar("charts/episodic_return", np.sum(data["rewards"]), global_step)
+        writer.add_scalar("charts/policy_loss", policy_loss.item(), global_step)
+        writer.add_scalar("charts/value_loss", value_loss.item(), global_step)
+        writer.add_scalar("charts/entropy", entropy_loss.item(), global_step)
 
-            # Backpropagation
-            self.optimizer.zero_grad()
-            loss.backward()
+        if update % 10 == 0:
+            print(f"Update {update}: Return={np.sum(data['rewards']):.2f}")
 
-            # Gradient clipping
-            torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=1.0)
+    env.close()
+    writer.close()
 
-            self.optimizer.step()
-
-        # Update old policy weights
-        self.policy_old.load_state_dict(self.policy.state_dict())
-
-
-
-# 3. Define memory for PPO
-class Memory:
-    def __init__(self):
-        self.states = []
-        self.actions = []
-        self.log_probs = []
-        self.rewards = []
-        self.dones = []
-
-    def clear(self):
-        self.states = []
-        self.actions = []
-        self.log_probs = []
-        self.rewards = []
-        self.dones = []
-
-# 4. Train the PPO agent
-def train_ppo():
-    # Initialize environment
-    env = MultiZoneThermalControlEnv()
-    state_dim = env.observation_space.shape[0]
-    action_dims = env.action_space.nvec
-
-    # Hyperparameters
-    total_episodes = 1000
-    max_timesteps = 200
-    update_timestep = 2000
-    memory = Memory()
-
-    # PPO Agent
-    ppo = PPO(state_dim, action_dims)
-
-    timestep = 0
-    for episode in range(total_episodes):
-        state = env.reset()
-        episode_reward = 0
-
-        for t in range(max_timesteps):
-            timestep += 1
-
-            # Select action
-            action = ppo.select_action(state, memory)
-            # print(action)
-            next_state, reward, done, _ = env.step(action)  # Pass the list of actions
-            memory.rewards.append(reward)
-            memory.dones.append(done)
-
-            episode_reward += reward
-            state = next_state
-
-            if done:
-                break
-
-            # Update PPO after every 'update_timestep' steps
-            if timestep % update_timestep == 0:
-                print("Update Memmory!")
-                ppo.update(memory)
-                memory.clear()
-                timestep = 0
-
-        print(f"Episode {episode + 1}, Reward: {episode_reward}")
-
-    # Save the trained model
-    torch.save(ppo.policy.state_dict(), "ppo_thermal_control.pth")
-    print("Model saved as 'ppo_thermal_control.pth'.")
 
 if __name__ == "__main__":
-    train_ppo()
+    train()

@@ -1,6 +1,6 @@
 import torch
 from train_agent import PPOAgent
-from thermal_env import MultiZoneThermalControlEnv
+from industrial_env.thermal_env import MultiZoneThermalControlEnv
 
 from IPython.core.debugger import set_trace
 
