@@ -1,37 +1,43 @@
 import torch
-from train_agent import PPOAgent
-from industrial_env.thermal_env import MultiZoneThermalControlEnv
+import gymnasium as gym
+import numpy as np
+import industrial_env
+from train_agent import ActorCritic, PPOConfig         # Reuse same config & model
 
-from IPython.core.debugger import set_trace
+def test_model(model_path="models/ppo_model.pt", episodes=5, render=True):
+    config = PPOConfig()
+    # env = gym.make("IndustrialEnvGym-v0", num_reservoirs=3)
+    env = gym.make(config.env_id, num_zones=3)
+    obs_dim = env.observation_space.shape[0]
+    act_dim = np.prod(env.action_space.shape)
 
-# Load environment
-env = MultiZoneThermalControlEnv()
-state_dim = env.observation_space.shape[0]
-action_dim = env.action_space.nvec
+    # Load model
+    model = ActorCritic(obs_dim, act_dim)
+    model.load_state_dict(torch.load(model_path, map_location=config.device))
+    model.eval()
 
-# Load trained model
-model = PPOAgent(state_dim, action_dim)
-model.load_state_dict(torch.load("ppo_thermal_control.pth"))
-model.eval()  # Set to evaluation mode
+    for ep in range(episodes):
+        obs, _ = env.reset()
+        done = False
+        total_reward = 0
+        step = 0
 
-# Test the agent
-state = env.reset()
-done = False
-total_reward = 0
-while not done:
-    with torch.no_grad():
-        action_probs, _ = model(torch.FloatTensor(state))
-    # Separate logits for each action dimension
-    action_probs_split = torch.split(action_probs, tuple(action_dim), dim=-1)
-    
-    actions = []
-    for prob in action_probs_split:
-        action = torch.argmax(prob).item()  # Choose the best action
-        actions.append(action)
-    # set_trace()
-    print("Action: ", actions)
-    state, reward, done, _ = env.step(actions)
-    env.render()  # Render the environment (if implemented)
-    total_reward += reward
+        while not done:
+            obs_tensor = torch.tensor(obs, dtype=torch.float32).to(config.device)
+            with torch.no_grad():
+                action, _, _ = model.get_action_and_value(obs_tensor)
 
-print(f"Total reward during testing: {total_reward}")
+            obs, reward, done, truncated, info = env.step(action.cpu().numpy())
+            total_reward += reward
+            step += 1
+
+            if render:
+                print(f"Step {step}: Reward={reward:.2f}, Obs={obs[:3]}, Actions={action}")
+                env.render()
+
+        print(f"Episode {ep+1} finished in {step} steps. Total Reward: {total_reward:.2f}")
+
+    env.close()
+
+if __name__ == "__main__":
+    test_model()

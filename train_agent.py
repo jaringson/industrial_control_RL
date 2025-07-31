@@ -8,18 +8,20 @@ from torch.utils.tensorboard import SummaryWriter
 import time
 import industrial_env
 
+from IPython.core.debugger import set_trace
+
 # PPO Hyperparameters
 class PPOConfig:
     env_id = "IndustrialEnvGym-v0"
     num_envs = 1
-    total_timesteps = 500_000
-    learning_rate = 3e-4
+    total_timesteps = 2_000_000
+    learning_rate = 3e-5
     gamma = 0.99
     gae_lambda = 0.95
     clip_coef = 0.2
     update_epochs = 10
     minibatch_size = 64
-    steps_per_epoch = 2048
+    steps_per_epoch = 4096 #2048
     vf_coef = 0.5
     ent_coef = 0.01
     max_grad_norm = 0.5
@@ -70,6 +72,7 @@ def collect_trajectories(env, model, config):
             action, logp, value = model.get_action_and_value(obs_tensor)
 
         action_np = action.cpu().numpy()
+        # set_trace()
         next_obs, reward, done, truncated, info = env.step(action_np)
 
         obs_list.append(obs)
@@ -112,18 +115,26 @@ def compute_gae(trajectories, gamma, lam):
     return adv, returns
 
 
-def train():
+def train(resume=False, model_path="models/ppo_model.pt"):
     config = PPOConfig()
     writer = SummaryWriter(f"runs/ppo-industrial-{int(time.time())}")
     
-    env = gym.make(config.env_id, num_reservoirs=3)
+    # env = gym.make(config.env_id, num_reservoirs=3)
+    env = gym.make(config.env_id, num_zones=3)
     obs_dim = env.observation_space.shape[0]
-    act_dim = env.action_space.shape[0]
+    act_dim = np.prod(env.action_space.shape) # Gets shape[0]*shape[1]
 
     model = ActorCritic(obs_dim, act_dim).to(config.device)
     optimizer = optim.Adam(model.parameters(), lr=config.learning_rate)
 
-    global_step = 0
+    if resume:
+        checkpoint = torch.load(model_path, map_location=config.device)
+        model.load_state_dict(checkpoint["model"])
+        optimizer.load_state_dict(checkpoint["optimizer"])
+        global_step = checkpoint["global_step"]
+        print(f"✅ Resumed from step {global_step}")
+    else:
+        global_step = 0
 
     for update in range(config.total_timesteps // config.steps_per_epoch):
         model.eval()
@@ -176,10 +187,15 @@ def train():
 
         if update % 10 == 0:
             print(f"Update {update}: Return={np.sum(data['rewards']):.2f}")
+            torch.save({
+                "model": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "global_step": global_step,
+            }, model_path)
 
     env.close()
     writer.close()
 
 
 if __name__ == "__main__":
-    train()
+    train(resume=False )
