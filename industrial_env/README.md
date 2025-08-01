@@ -11,7 +11,7 @@ A custom Gymnasium environment simulating a server cooling system for reinforcem
 This environment is ideal for experimenting with safe RL, multi-agent coordination, energy optimization, and continuous control.
 
 ## Table of Contents
-1. [Dyanmics](#dynamics)
+1. [Dyanmics](#%EF%B8%8F-dynamics)
 2. [Observation Space](#-observation-space)
 3. [Action Space](#-action-space)
 4. [Reward Function](#-reward-function)
@@ -19,7 +19,7 @@ This environment is ideal for experimenting with safe RL, multi-agent coordinati
    
 ---
 
-## Dynamics
+## 🛠️ Dynamics
 
 - Each **zone** (e.g. server rack) generates heat via an exogenous **server load**.
 - The agent controls the **coolant flow matrix**, deciding how much cooling flow to route between zones.
