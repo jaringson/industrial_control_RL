@@ -2,7 +2,10 @@
 
 A custom Gymnasium environment simulating a server cooling system for reinforcement learning agents. Here is a AI generated image to roughly show the setup.
 
-![Cooling description diagram](/industrial_env/cooling_diagram.png)
+<!--  ![Cooling description diagram](/industrial_env/cooling_diagram.png) -->
+<p align="center">
+<img src="/industrial_env/cooling_diagram.png" alt="drawing" width="400" style="margin: 0 auto"/>
+</p>
 
 ## 📘 Overview
 
