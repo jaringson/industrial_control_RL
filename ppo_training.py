@@ -2,14 +2,14 @@ import gym
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.evaluation import evaluate_policy
-from industrial_env.rl_gym_industrial_env import IndustrialEnvGym
+from industrial_env.rl_gym_industrial_env_NEW import ServerCoolingEnv
 
 from IPython.core.debugger import set_trace
 
 
 # Create and verify the environment
-env = IndustrialEnvGym(num_reservoirs=3)
-# check_env(env)  # Check if the environment adheres to Gym's API
+env = ServerCoolingEnv(num_zones=3)
+check_env(env)  # Check if the environment adheres to Gym's API
 
 # Define the RL model
 model = PPO(
@@ -22,23 +22,23 @@ model = PPO(
     # gamma=0.99
 )
 
-# # Train the model
-# print("Starting training...")
-# model.learn(total_timesteps=1000000)
+# Train the model
+print("Starting training...")
+model.learn(total_timesteps=1000000)
 
-# # Save the model
-# model.save("ppo_industrial_env")
-# print("Model saved.")
+# Save the model
+model.save("ppo_industrial_env")
+print("Model saved.")
 
-# Load the model
-model.load("ppo_industrial_env")
+# # Load the model
+# model.load("ppo_industrial_env")
 
 # Evaluate the trained model
-mean_reward, std_reward = evaluate_policy(model, env, n_eval_episodes=10)
-print(f"Mean reward: {mean_reward} \u00b1 {std_reward}")
+# mean_reward, std_reward = evaluate_policy(model, env, n_eval_episodes=10)
+# print(f"Mean reward: {mean_reward} \u00b1 {std_reward}")
 
 # Test the trained model
-env = IndustrialEnvGym(num_reservoirs=3)  # Create a fresh environment
+env = ServerCoolingEnv(num_zones=3)  # Create a fresh environment
 obs, _ = env.reset()
 for _ in range(1000):
     action, _states = model.predict(obs, deterministic=True)

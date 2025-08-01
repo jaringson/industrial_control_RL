@@ -2,95 +2,125 @@ import numpy as np
 import gymnasium
 from gymnasium import spaces
 
-from IPython.core.debugger import set_trace
+class LoadModel:
+    def __init__(self, num_zones, theta=0.05, mu=25, sigma=5):
+        self.num_zones = num_zones
+        self.theta = theta
+        self.mu = mu
+        self.sigma = sigma
+        self.state = np.random.uniform(mu - 10, mu + 10, num_zones)
 
-class IndustrialEnvGym(gymnasium.Env):
-    def __init__(self, num_reservoirs):
-        super(IndustrialEnvGym, self).__init__()
+    def step(self):
+        dx = self.theta * (self.mu - self.state) + self.sigma * np.random.randn(self.num_zones)
+        self.state += dx
+        self.state = np.clip(self.state, 0, 50)  # Optional bounds
+        return self.state
+    
 
-        self.num_reservoirs = num_reservoirs
+class ServerCoolingEnv(gymnasium.Env):
+    def __init__(self, num_zones):
+        super(ServerCoolingEnv, self).__init__()
 
-        # Define action and observation spaces
-        # Actions: Heat inputs (Watts) and flow rates (kg/s)
+        self.num_zones = num_zones
+
+        self.load_model = LoadModel(self.num_zones)
+
+        # Agent controls flow between zones (coolant routing)
         self.action_space = spaces.Box(
-            low=np.array([-20] * num_reservoirs + [0] * (num_reservoirs**2)),
-            high=np.array([20] * num_reservoirs + [10] * (num_reservoirs**2)),
+            low=0.0,
+            high=10.0,
+            shape=(num_zones, num_zones ),
             dtype=np.float64
         )
 
-        # Observations: Temperatures (K) and pressures (atm)
+        # Observations: Zone temperatures (K) and pressures (atm)
         self.observation_space = spaces.Box(
-            low=np.array([300] * num_reservoirs + [0.1] * num_reservoirs),
-            high=np.array([400] * num_reservoirs + [20] * num_reservoirs),
+            low=np.array([290] * num_zones + [0.1] * num_zones),
+            high=np.array([400] * num_zones + [20] * num_zones),
             dtype=np.float64
         )
 
-        # Initialize state
+        # Constants
+        self.dt = 1.0
+        self.thermal_capacities = np.random.uniform(1000, 2000, num_zones)  # J/K per zone
+        self.pressure_coefficients = np.random.uniform(0.1, 1.0, num_zones)  # flow to pressure change
+        self.heat_transfer_coeff = 0.1  # tunable
+        self.cooling_temp = 290.0  # fixed ambient coolant temperature
+        self.cooling_coeff = 1.0  # cooling sink strength
+
         self.reset()
 
-        # System parameters
-        self.thermal_capacities = np.random.uniform(1000, 2000, num_reservoirs)  # J/(kg*K)
-        self.pressure_coefficients = np.random.uniform(0.1, 1, num_reservoirs)  # kg/(m^3*s)
-        self.dt = 1.0  # Time step
+    def dynamics(self, temperatures, pressures, flow_inputs, server_loads, cooling_controls):
+        d_temperatures = np.zeros(self.num_zones)
+        d_pressures = np.zeros(self.num_zones)
 
-    def dynamics(self, state, heat_inputs, flow_inputs):
-        temperatures, pressures = state
-        d_temperatures = np.zeros(self.num_reservoirs)
-        d_pressures = np.zeros(self.num_reservoirs)
+        for i in range(self.num_zones):
+            # Server load is external heat input
+            heat_change = server_loads[i]
 
-        for i in range(self.num_reservoirs):
-            heat_change = heat_inputs[i]
-            for j in range(self.num_reservoirs):
+            # Heat exchange with other zones via flow
+            for j in range(self.num_zones):
                 if i != j:
+                    temp_diff = temperatures[j] - temperatures[i]
                     mass_flow = flow_inputs[j, i] - flow_inputs[i, j]
-                    heat_change += (temperatures[j] - temperatures[i]) * mass_flow * self.thermal_capacities[i]
+                    heat_change += self.heat_transfer_coeff * temp_diff * mass_flow
 
+            # Heat removal via cooling reservoir
+            # heat_change -= self.cooling_coeff * (temperatures[i] - self.cooling_temp)
+            heat_change -= self.cooling_coeff * cooling_controls[i] * (temperatures[i] - self.cooling_temp)
+
+            # Temperature rate of change
             d_temperatures[i] = heat_change / self.thermal_capacities[i]
 
-            net_flow = sum(flow_inputs[i, :]) - sum(flow_inputs[:, i])
+            # Pressure changes from net flow
+            net_flow = np.sum(flow_inputs[i, :]) - np.sum(flow_inputs[:, i])
             d_pressures[i] = net_flow * self.pressure_coefficients[i]
 
         return d_temperatures, d_pressures
 
     def step(self, action):
-        # Parse action into heat inputs and flow inputs
-        heat_inputs = action[:self.num_reservoirs]
-        flow_inputs = action[self.num_reservoirs:].reshape((self.num_reservoirs, self.num_reservoirs))
 
-        # RK4 integration
-        state = (self.temperatures, self.pressures)
-        k1_temp, k1_pres = self.dynamics(state, heat_inputs, flow_inputs)
-        k2_temp, k2_pres = self.dynamics(
-            (self.temperatures + 0.5 * self.dt * np.array(k1_temp),
-             self.pressures + 0.5 * self.dt * np.array(k1_pres)),
-            heat_inputs, flow_inputs)
-        k3_temp, k3_pres = self.dynamics(
-            (self.temperatures + 0.5 * self.dt * np.array(k2_temp),
-             self.pressures + 0.5 * self.dt * np.array(k2_pres)),
-            heat_inputs, flow_inputs)
-        k4_temp, k4_pres = self.dynamics(
-            (self.temperatures + self.dt * np.array(k3_temp),
-             self.pressures + self.dt * np.array(k3_pres)),
-            heat_inputs, flow_inputs)
+        # action = action.reshape(self.num_zones, self.num_zones + 1)
+        # flow_inputs = action[:, :-1]
+        # cooling_controls = action[:, -1]
 
-        self.temperatures += (self.dt / 6.0) * (np.array(k1_temp) + 2 * np.array(k2_temp) + 2 * np.array(k3_temp) + np.array(k4_temp))
-        self.pressures += (self.dt / 6.0) * (np.array(k1_pres) + 2 * np.array(k2_pres) + 2 * np.array(k3_pres) + np.array(k4_pres))
-        self.pressures = np.clip(self.pressures, 0.1, None)
+        action = action.reshape(self.num_zones, self.num_zones)
+        flow_inputs = action
+        cooling_controls = np.ones_like(action[:, -1])
 
-        # Calculate reward (example: minimize deviations from target state)
-        target_temperatures = np.full(self.num_reservoirs, 350)  # Target temperature (K)
-        target_pressures = np.full(self.num_reservoirs, 5)  # Target pressure (atm)
+        flow_inputs = np.clip(flow_inputs, 0.0, 10.0)
 
-        reward = -np.sum((self.temperatures - target_temperatures)**2) #- np.sum((self.pressures - target_pressures)**2)
+        # Simulated server loads (can randomize or make time-varying)
+        # server_loads = np.random.uniform(0, 50, self.num_zones)  # Watts
+        server_loads = self.load_model.step()
 
-        # Check termination condition
-        terminated = bool(np.any(self.temperatures < 200) or np.any(self.temperatures > 500) or \
-               np.any(self.pressures < 0.1) or np.any(self.pressures > 20))
+        # Runge-Kutta Integration (RK4)
+        k1_t, k1_p = self.dynamics(self.temperatures, self.pressures, flow_inputs, server_loads, cooling_controls)
+        k2_t, k2_p = self.dynamics(self.temperatures + 0.5 * self.dt * k1_t,
+                                   self.pressures + 0.5 * self.dt * k1_p,
+                                   flow_inputs, server_loads, cooling_controls)
+        k3_t, k3_p = self.dynamics(self.temperatures + 0.5 * self.dt * k2_t,
+                                   self.pressures + 0.5 * self.dt * k2_p,
+                                   flow_inputs, server_loads, cooling_controls)
+        k4_t, k4_p = self.dynamics(self.temperatures + self.dt * k3_t,
+                                   self.pressures + self.dt * k3_p,
+                                   flow_inputs, server_loads, cooling_controls)
 
-        # Compile observation
+        self.temperatures += (self.dt / 6.0) * (k1_t + 2*k2_t + 2*k3_t + k4_t)
+        self.pressures += (self.dt / 6.0) * (k1_p + 2*k2_p + 2*k3_p + k4_p)
+        self.pressures = np.clip(self.pressures, 0.1, 20.0)
+
+        # Reward: penalize overheating and control effort
+        target_temp = 310.0  # Ideal operating temp (K)
+        temp_penalty = np.sum((self.temperatures - target_temp) ** 2)
+        flow_penalty = np.sum(flow_inputs ** 2)
+
+        # reward = -temp_penalty - 0.1 * flow_penalty
+        reward = -temp_penalty - 0.1 * flow_penalty - 0.5 * np.sum(cooling_controls**2)
+
+        terminated = bool(np.any(self.temperatures < 250) or np.any(self.temperatures > 500))
+
         observation = np.concatenate((self.temperatures, self.pressures))
-
-
         truncated = False
         info = {}
 
@@ -98,27 +128,21 @@ class IndustrialEnvGym(gymnasium.Env):
 
     def reset(self, seed=None, options=None):
         if seed is not None:
-            self.random_seed = seed
-            np.random.seed(self.random_seed)
-        
-        self.temperatures = np.random.uniform(300, 400, self.num_reservoirs)
-        self.pressures = np.random.uniform(1, 10, self.num_reservoirs)
-        self.flows = np.zeros((self.num_reservoirs, self.num_reservoirs))
-
-        info = {} 
-
-        return np.concatenate((self.temperatures, self.pressures)), info
+            np.random.seed(seed)
+        self.temperatures = np.random.uniform(280, 340, self.num_zones)
+        self.pressures = np.random.uniform(1, 5, self.num_zones)
+        return np.concatenate((self.temperatures, self.pressures)), {}
 
     def render(self, mode='human'):
-        print(f"State: {self.temperatures}, {self.pressures}")
+        print(f"Temperatures (K): {self.temperatures}")
+        print(f"Pressures (atm): {self.pressures}")
 
-# Example Usage
+# Example run
 if __name__ == "__main__":
-    env = IndustrialEnvGym(num_reservoirs=3)
-    obs = env.reset()
+    env = ServerCoolingEnv(num_zones=3)
+    obs, _ = env.reset()
     print("Initial Observation:", obs)
-
-    action = np.array([10, 15, 12, 0, 5, 3, 2, 0, 4, 3, 6, 0])
+    action = np.random.uniform(0, 5, (3, 3))
     obs, reward, terminated, truncated, info = env.step(action)
     print("Next Observation:", obs)
     print("Reward:", reward)

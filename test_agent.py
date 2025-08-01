@@ -4,16 +4,17 @@ import numpy as np
 import industrial_env
 from train_agent import ActorCritic, PPOConfig         # Reuse same config & model
 
-def test_model(model_path="models/ppo_model.pt", episodes=5, render=True):
+def test_model(checkpoint_path="models/ppo_model_2.pt", episodes=1, render=True):
     config = PPOConfig()
     # env = gym.make("IndustrialEnvGym-v0", num_reservoirs=3)
     env = gym.make(config.env_id, num_zones=3)
     obs_dim = env.observation_space.shape[0]
     act_dim = np.prod(env.action_space.shape)
 
-    # Load model
-    model = ActorCritic(obs_dim, act_dim)
-    model.load_state_dict(torch.load(model_path, map_location=config.device))
+    # Load model + optimizer from checkpoint
+    checkpoint = torch.load(checkpoint_path, map_location=config.device)
+    model = ActorCritic(obs_dim, act_dim).to(config.device)
+    model.load_state_dict(checkpoint["model"])
     model.eval()
 
     for ep in range(episodes):
@@ -22,7 +23,7 @@ def test_model(model_path="models/ppo_model.pt", episodes=5, render=True):
         total_reward = 0
         step = 0
 
-        while not done:
+        for _ in range(config.steps_per_epoch):
             obs_tensor = torch.tensor(obs, dtype=torch.float32).to(config.device)
             with torch.no_grad():
                 action, _, _ = model.get_action_and_value(obs_tensor)

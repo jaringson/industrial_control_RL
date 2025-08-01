@@ -15,7 +15,7 @@ class PPOConfig:
     env_id = "IndustrialEnvGym-v0"
     num_envs = 1
     total_timesteps = 2_000_000
-    learning_rate = 3e-5
+    learning_rate = 1e-5
     gamma = 0.99
     gae_lambda = 0.95
     clip_coef = 0.2
@@ -130,9 +130,9 @@ def train(resume=False, model_path="models/ppo_model.pt"):
     if resume:
         checkpoint = torch.load(model_path, map_location=config.device)
         model.load_state_dict(checkpoint["model"])
-        optimizer.load_state_dict(checkpoint["optimizer"])
+        # optimizer.load_state_dict(checkpoint["optimizer"])
         global_step = checkpoint["global_step"]
-        print(f"✅ Resumed from step {global_step}")
+        print(f"Resumed from step {global_step}")
     else:
         global_step = 0
 
@@ -198,4 +198,4 @@ def train(resume=False, model_path="models/ppo_model.pt"):
 
 
 if __name__ == "__main__":
-    train(resume=False )
+    train(resume=False, model_path="models/ppo_model_2.pt")
