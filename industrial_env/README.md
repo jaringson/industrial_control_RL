@@ -1,8 +1,8 @@
 # ServerCoolingEnv 🌡️❄️
 
-A custom Gymnasium environment simulating a server cooling system for reinforcement learning agents.
+A custom Gymnasium environment simulating a server cooling system for reinforcement learning agents. Here is a AI generated image to roughly show the setup.
 
-[](/industrial_env/cooling_diagram.png)
+![Cooling description diagram](/industrial_env/cooling_diagram.png)
 
 ## 📘 Overview
 
