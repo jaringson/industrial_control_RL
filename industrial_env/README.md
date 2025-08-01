@@ -2,6 +2,8 @@
 
 A custom Gymnasium environment simulating a server cooling system for reinforcement learning agents.
 
+[](/industrial_env/cooling_diagram.png)
+
 ## 📘 Overview
 
 `ServerCoolingEnv` models the thermal dynamics of multiple server zones that generate heat and require active cooling to maintain safe operating temperatures. The RL agent controls coolant flow between zones to efficiently manage heat distribution and dissipation via an external cooling reservoir.
