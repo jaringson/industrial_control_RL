@@ -16,6 +16,7 @@ This environment is ideal for experimenting with safe RL, multi-agent coordinati
 3. [Action Space](#-action-space)
 4. [Reward Function](#-reward-function)
 5. [Example Usage](#-example-usage)
+6. [Installation](#-installation)
    
 ---
 
