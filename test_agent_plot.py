@@ -31,7 +31,7 @@ def test_model_with_visualization(model_path="models/ppo_model_2.pt", max_steps=
 
     action_im = ax_action.imshow(np.zeros((zone_count, zone_count)), vmin=0, vmax=10, cmap='Blues')
     ax_action.set_title("Flow Actions Matrix")
-    plt.tight_layout()
+    # plt.tight_layout()
 
     def update(frame):
         nonlocal obs
@@ -55,6 +55,12 @@ def test_model_with_visualization(model_path="models/ppo_model_2.pt", max_steps=
         return temp_bar, action_im
 
     ani = animation.FuncAnimation(fig, update, frames=max_steps, interval=20, blit=False)
+
+    # Save the animation as an MP4
+    # Writer = animation.writers['ffmpeg']
+    # writer = Writer(fps=20, metadata=dict(artist='Me'), bitrate=1800)
+    # ani.save('videos/animation.mp4', writer=writer)
+
     plt.show()
     env.close()
 

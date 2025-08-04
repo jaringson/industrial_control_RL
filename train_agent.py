@@ -198,4 +198,4 @@ def train(resume=False, model_path="models/ppo_model.pt"):
 
 
 if __name__ == "__main__":
-    train(resume=False, model_path="models/ppo_model_2.pt")
+    train(resume=False, model_path="models/ppo_model_8.pt")

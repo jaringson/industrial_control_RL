@@ -29,7 +29,7 @@ class ServerCoolingEnv(gymnasium.Env):
         self.action_space = spaces.Box(
             low=0.0,
             high=10.0,
-            shape=(num_zones, num_zones ),
+            shape=(num_zones, num_zones + 1),
             dtype=np.float64
         )
 
@@ -80,13 +80,15 @@ class ServerCoolingEnv(gymnasium.Env):
 
     def step(self, action):
 
-        # action = action.reshape(self.num_zones, self.num_zones + 1)
-        # flow_inputs = action[:, :-1]
-        # cooling_controls = action[:, -1]
+        self.timestep += 1
 
-        action = action.reshape(self.num_zones, self.num_zones)
-        flow_inputs = action
-        cooling_controls = np.ones_like(action[:, -1])
+        action = action.reshape(self.num_zones, self.num_zones + 1)
+        flow_inputs = action[:, :-1]
+        cooling_controls = action[:, -1]
+
+        # action = action.reshape(self.num_zones, self.num_zones)
+        # flow_inputs = action
+        # cooling_controls = np.ones_like(action[:, -1])
 
         flow_inputs = np.clip(flow_inputs, 0.0, 10.0)
 
@@ -114,10 +116,23 @@ class ServerCoolingEnv(gymnasium.Env):
         target_temp = 310.0  # Ideal operating temp (K)
         temp_penalty = np.sum((self.temperatures - target_temp) ** 2)
         flow_penalty = np.sum(flow_inputs ** 2)
+        cooling_penalty = np.sum(cooling_controls ** 2)
 
+        # ---------------- #
         # reward = -temp_penalty - 0.1 * flow_penalty
-        reward = -temp_penalty - 0.1 * flow_penalty - 0.5 * np.sum(cooling_controls**2)
+        
+        # ---------------- #
+        # reward = -temp_penalty - 0.1 * flow_penalty - 0.5 * cooling_penalty
+        # reward = -temp_penalty - 0.5 * cooling_penalty
+        # if np.all(np.abs(self.temperatures - target_temp) < 2.0):
+        #     reward += 5.0 * (1.0 / (1 + self.timestep))
 
+        # ---------------- #
+        time_weighted_penalty = 0.01 * temp_penalty * self.timestep
+        # reward = - 0.1 * flow_penalty - time_weighted_penalty
+        reward = - time_weighted_penalty - 0.5 * cooling_penalty
+
+        # ---------------- #
         terminated = bool(np.any(self.temperatures < 250) or np.any(self.temperatures > 500))
 
         observation = np.concatenate((self.temperatures, self.pressures))
@@ -131,6 +146,7 @@ class ServerCoolingEnv(gymnasium.Env):
             np.random.seed(seed)
         self.temperatures = np.random.uniform(280, 340, self.num_zones)
         self.pressures = np.random.uniform(1, 5, self.num_zones)
+        self.timestep = 0
         return np.concatenate((self.temperatures, self.pressures)), {}
 
     def render(self, mode='human'):
