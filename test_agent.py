@@ -4,7 +4,7 @@ import numpy as np
 import industrial_env
 from train_agent import ActorCritic, PPOConfig         # Reuse same config & model
 
-def test_model(checkpoint_path="models/ppo_model_2.pt", episodes=1, render=True):
+def test_model(checkpoint_path="models/ppo_model_8.pt", episodes=1, render=True):
     config = PPOConfig()
     # env = gym.make("IndustrialEnvGym-v0", num_reservoirs=3)
     env = gym.make(config.env_id, num_zones=3)

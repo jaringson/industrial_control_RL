@@ -123,14 +123,14 @@ class ServerCoolingEnv(gymnasium.Env):
         
         # ---------------- #
         # reward = -temp_penalty - 0.1 * flow_penalty - 0.5 * cooling_penalty
-        # reward = -temp_penalty - 0.5 * cooling_penalty
-        # if np.all(np.abs(self.temperatures - target_temp) < 2.0):
-        #     reward += 5.0 * (1.0 / (1 + self.timestep))
+        reward = -temp_penalty - 0.5 * cooling_penalty
+        if np.all(np.abs(self.temperatures - target_temp) < 2.0):
+            reward += 5.0 * (1.0 / (1 + self.timestep))
 
         # ---------------- #
-        time_weighted_penalty = 0.01 * temp_penalty * self.timestep
-        # reward = - 0.1 * flow_penalty - time_weighted_penalty
-        reward = - time_weighted_penalty - 0.5 * cooling_penalty
+        # time_weighted_penalty = 0.01 * temp_penalty * self.timestep
+        # # reward = - 0.1 * flow_penalty - time_weighted_penalty
+        # reward = - time_weighted_penalty - 0.5 * cooling_penalty
 
         # ---------------- #
         terminated = bool(np.any(self.temperatures < 250) or np.any(self.temperatures > 500))
